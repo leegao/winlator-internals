@@ -1,57 +1,18 @@
-<header>
+# Winlator Internals
 
-<!--
-  <<< Author notes: Course header >>>
-  Include a 1280×640 image, course title in sentence case, and a concise description in emphasis.
-  In your repository settings: enable template repository, add your 1280×640 social image, auto delete head branches.
-  Add your open source license, GitHub uses MIT license.
--->
+I'm a bored (former) software engineer who loves to take things apart. In this series, I'm going to reverse engineer Winlator and its various forks, libraries, and dependencies.
 
-# GitHub Pages
-
-_Create a site or blog from your GitHub repositories with GitHub Pages._
-
-</header>
-
-<!--
-  <<< Author notes: Finish >>>
-  Review what we learned, ask for feedback, provide next steps.
--->
-
-## Finish
-
-_Congratulations friend, you've completed this course!_
-
-<img src=https://octodex.github.com/images/constructocat2.jpg alt=celebrate width=300 align=right>
-
-Your blog is now live and has been deployed!
-
-Here's a recap of all the tasks you've accomplished in your repository:
-
-- You enabled GitHub Pages.
-- You selected a theme using the config file.
-- You learned about proper directory format and file naming conventions in Jekyll.
-- You created your first blog post with Jekyll!
-
-### What's next?
-
-- Keep working on your GitHub Pages site... we love seeing what you come up with!
-- We'd love to hear what you thought of this course [in our discussion board](https://github.com/orgs/skills/discussions/categories/github-pages).
-- [Take another GitHub Skills course](https://github.com/skills).
-- [Read the GitHub Getting Started docs](https://docs.github.com/en/get-started).
-- To find projects to contribute to, check out [GitHub Explore](https://github.com/explore).
-
-<footer>
-
-<!--
-  <<< Author notes: Footer >>>
-  Add a link to get support, GitHub status page, code of conduct, license link.
--->
+See https://leegao.github.io/winlator-internals/
 
 ---
 
-Get help: [Post in our discussion board](https://github.com/orgs/skills/discussions/categories/github-pages) &bull; [Review the GitHub status page](https://www.githubstatus.com/)
+## Series
 
-&copy; 2023 GitHub &bull; [Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/code_of_conduct.md) &bull; [MIT License](https://gh.io/mit)
+### Vortek Internals
 
-</footer>
+![arch](https://dev-to-uploads.s3.amazonaws.com/uploads/articles/1himism1aka1cnlfxlq1.png)
+
+1. [Vortek Internals: Part 1 - Command Buffers](https://leegao.github.io/winlator-internals/2025/06/01/Vortek1.html)
+   * Deep dive into the internal architecture of Vortek, a Vulkan "driver" designed to work around runtime incompatibilities of software running within glibc on Bionic systems within Winlator. Vortek implements a client-server model where Vulkan commands are marshaled across an IPC boundary, allowing a game client running on glibc (box64 + wine) to interface with a native Vulkan renderer server (winlator and surfaceflinger).
+2. [Vortek Internals: Part 2 - Driver-Specific Workarounds](https://leegao.github.io/winlator-internals/2025/06/02/Vortek2.html)
+   * Deep dive into some driver-specific workarounds that Vortek uses to enable DirectX gaming on non-spec-compliant hardware, such as Mali GPUs, by emulating missing features directly within the driver, addressing shortcomings like the absence of BCn texture compression, gl_ClipDistance, etc.
