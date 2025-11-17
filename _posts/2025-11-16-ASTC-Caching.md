@@ -1,6 +1,6 @@
 ---
 title: "Caching ASTC Parameters to Disk"
-date: 2025-11-18
+date: 2025-11-16
 ---
 
 ## Intro
