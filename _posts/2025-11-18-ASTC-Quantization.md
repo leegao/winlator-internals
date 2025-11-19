@@ -12,9 +12,24 @@ Well, one final step before you write out your block - select your quantization 
 
 ASTC supports per-block dynamic quantization modes for both the color endpoints, as well as your matrix of weights. This is a blessing and a curse - you can do a lot of things to really fine-tune the quantization mode that best suits your block, but doing so can be complicated since you have a potentially large search space.
 
-In this post, I'll present (a so far seemingly novel?) heuristic that approximately minimizes the $L^2$ error of the optimal quantization mode search, without doing the discrete combinatorial search.
+In this post, I'll present a heuristic that approximately minimizes the $L^2$ error of the optimal quantization mode search, without doing any discrete combinatorial search.
 
 ---
+
+**TL;DR:**
+
+The optimal number of bits per color endpoint component per pixel is given by
+
+$$
+\hat{Q^*}_c(\delta_j, w_i) = \frac{A + \log_2{\frac{1 + 2w_i}{B\delta_j}}}{1 + B}
+$$
+
+where
+
+1. $A = \frac{\text{number of bits not in header+metadata}}{16}$, so $\frac{111}{16}$ for single partition (17 bits of header + metadata), and $\frac{99}{16}$ for double partition (29 bits of header + metadata + partition seed)
+2. $B = \frac{\text{number of color endpoint components}}{16}$, so 6 for 1 x RGB, 8 for 1 x RGBA, 12 for 2 x RGB, and 16 for 2 x RGBA
+3. $\delta_j = ep_1[j] - ep_0[j]$ is the "spread" or the difference between the first and second color endpoint component for this pixel
+4. $w_i$ is the $i^{th}$ weight of the pixel
 
 ## ASTC Parameters
 
@@ -282,10 +297,66 @@ This suggests that:
 
 This means that if our spread is high, we'll just pull the $Q_c$ up, which is a desirable property.
 
+### Multichannel Optimization
+
+So far, we've only been considering the subproblem where your pair of $ep_0, ep_1$ are scalars (e.g. just the red, green, or blue components). Let's now extend our error function to the multichannel problem (3 for RGB, or 4 for RGBA).
+
+#### Weighted Mean
+
+A straightforward extension here is to compute the same weighted sum as before, just now summing over the color channels:
+
+$$
+Q_c = \frac{\sum_{i,j} (1 + 2w_i) \hat{Q}(\delta_j, w_i)}{\sum_{i,j}(1 + 2w_i)} = \mathsf{mean}(Q^R_c, Q^G_c, Q^B_c)
+$$
+
+Note that in this formulation, $Q_c$ gives equal vote to each color channel, which may not be great if you have a block where one channel is flat while the others are high.
+
+Instead, we can formulate another variant of the problem that allows all components to participate in voting for their favorite $Q_c$ allocation.
+
+#### Alternative Solution - Global Optimization
+
+To start, let's see how our cost function $E$ changes. 
+
+We can parameterize it by $\Delta_\Sigma = \delta_R + \delta_G + \cdots$ which is effectively the sum of the spread of the color endpoints, and $K_\Sigma = \sum_i 1 + 2w_i$. Let $M$ be the number of color components (3 or 4), then doing the same error propagation on the reconstruction error will yield:
+
+$$
+4 E_{\Sigma}(Q_c, \Delta_\Sigma, K_\Sigma) \approx \underbrace{\Delta_{\Sigma} \cdot 2^{-Q_w}}_{\text{Weighted Gradient Noise}} + \underbrace{(M \cdot K_{\Sigma}) \cdot 2^{-Q_c}}_{\text{Endpoint Quantization Noise}} 
+$$
+
+where $Q_w = A - BQ_c$.
+
+Note that we've moved the sum over the weights within the endpoint quantization noise term within the error directly (meaning we no longer need to do an explicit weighted means).
+
+The optimal $Q_c$ is now given by
+
+$$
+\hat{Q}_c(\Delta_\Sigma, K_\Sigma) = \frac{A + \log_2\left(\frac{M \cdot K_{\Sigma}}{B \cdot \Delta_{\Sigma}}\right)}{1 + B}
+$$
+
+You'll notice that this solution has the same exact sensitivity to $\delta, K$, however, unlike the weighted-sum solution, this one is completely invariant to the spread of $\delta, K$. This is also a lot more computationally efficient than the earlier solution.
+
 ### Packing
 
-At the end of this process, we have a $Q^*_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one. However, if the quantization levels available in ASTC is coarse for a particular $Q^*_c$, it is probably better to perform a "two-tap" procedure:
+At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one. However, if the quantization levels available in ASTC is coarse for a particular $Q_c$, it is probably better to perform a "two-tap" procedure:
 
 1. Identify the two valid quantization methods closest to $Q^*_c$
 2. Calculate the reconstruction error loss for each (either by actually reconstructing the pixels, or using the approximation $E$ above)
 3. Return the best quantization method between the two.
+
+### Final Algorithm
+
+```python
+# Assume we're doing single partition
+M = block.channels # 3 for RGB, 4 for RGBA
+Delta = abs(block.ep1 - block.ep0).sum() # + ep2,ep3 too
+K = (1 + 2 * block.weights).sum()
+A = 111 / 16
+B = 2 * M / 16
+Qc = clamp((A + math.log2(M * K / (B * Delta))) / (1 + B), 1, 8)
+
+# Look for the pair of modes closes to Qc
+for i, mode in enumerate(ASTC_MODES):
+	next_mode = ASTC_MODES[i+1]
+	if mode.color_bits <= Qc <= next_mode.color_bits:
+		return # either mode or next_mode based on lower error
+```
