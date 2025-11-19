@@ -3,6 +3,9 @@ title: "Optimal Quantization Mode Search within ASTC"
 date: 2025-11-18
 ---
 
+
+# "Optimal" Quantization Mode Search within ASTC
+
 Let's say we just spent a generous number of flops doing an incredible job solving the crap out of a series of linear algebra or descent problems in order to find the perfect set of parameters for an ASTC block. What do you do now?
 
 Well, one final step before you write out your block - select your quantization mode.
@@ -98,7 +101,7 @@ QUANT_8 = [
 ]
 ```
 
-so this effectively quantizes your 0.33 down to 0.286 (with an absolute error of $|0.33 - 0.286|$)
+so this effectively quantizes your 0.33 down to 0.286 (with an absolute error of $0.33 - 0.286$)
 
 As you can probably intuit, a larger quantization range results in lower average absolute errors, because your discrete value points are closer together.
 
@@ -170,14 +173,38 @@ E(x, \delta, w_i) &= \delta 2^{-(A-Bx) - 2} + (1-2w_i)2^{-x - 2} \\
 & \text{isolate constants} \\
 &= 2^{-2} (\delta2^{Bx - A} + (1 - 2w_i) 2^{-x}) \\
 & \text{taking the x derivative mod constants} \\
-dE/dx &= (1 + 2w_i)2^{-x} - B\delta2^{Bx-A} \\
+C \dfrac{dE}{dx} &= (1 + 2w_i)2^{-x} - B\delta2^{Bx-A} \\
 & \text{set to 0 to optimize} \\
 B\delta2^{Bx-A} &= (1 + 2w_i)2^{-x} \\
 \hat{Q}_c(\delta, w_i) &= \frac{A + \log_2{\frac{1 + 2w_i}{B\delta}}}{1 + B}
 \end{align*}
 $$
 
-### Perturbation Analysis
+Woot! We now have an analytic description of the optimal value as a "tug-of-war" between $w_i$ and $\delta$:
+
+$$
+\log_2{(1 + 2w_i)} - \log_2{B\delta}
+$$
+
+(note: you can, and should, make use of libraries like sympy to do these symbolic differentiations)
+
+```python
+from sympy import symbols, diff, solve, log, simplify, Eq, cancel
+Q = symbols('Q', real=True, positive=True)
+A, B = symbols('A B', real=True, positive=True)
+delta = symbols('delta', real=True, positive=True)
+w = symbols('w', real=True, positive=True)
+
+E = delta * 2**(-(A - B*Q) - 2) + (1 + 2*w) * 2**(-Q - 2)
+dE_dQ = diff(E, Q)
+print("Derivative:", dE_dQ)
+print("Solution:", solve(dE_dQ, Q))
+
+# Derivative: -2**(-Q - 2)*(2*w + 1)*log(2) + 2**(-A + B*Q - 2)*B*delta*log(2)
+# Solution: log((2**A*(2*w + 1)/(B*delta))**(1/((B + 1)*log(2))))
+```
+
+#### Perturbation Analysis
 
 We can take the partial derivative of $\hat{Q}_c$ wrt $d\delta$ and $dw$ to understand the behavior of the solution space:
 
@@ -208,8 +235,57 @@ $$
 
 note that $\delta$ is invariant wrt the weight indices.
 
+#### Perturbation Analysis
+
+Intuitively, this approximation should be good if the spread of $w_i$ itself is low. Let us also look at how sensitive $Q_c$ is to this spread.
+
+Let's transform the problem slightly. First, let $K_i = 1 + 2w_i$ denote the "sensitivity" factor of $Q_c$ (since increasing $K$ increases $Q_c$ almost linearly when $K$ is close to 1). We can also reduce the weighted means $Q_c$ to just the variables containing $K$:
+
+$$
+\begin{align*}
+F(K) &= \frac{\sum_i K_i Q_i}{\sum_i K_i} \\
+& \text{since all but the } \log_2(1+2w_i) \text{ term are independent of K} \\
+&\sim C\frac{\sum_i K_i \log(K_i)}{\sum_i K_i}
+\end{align*}
+$$
+
+where $C = (1+B)^{-1}$ is the scale factor from $Q_c$
+
+We can further reduce this problem to just a 2-pixels problem of the spread of $K$:
+
+1. let $K_{min} = \mu_K - d_K = \mu - \frac{\Delta_K}{2}$
+2. let $K_{max} = \mu_K + d_K = \mu + \frac{\Delta_K}{2}$
+
+where $\mu_K$ is the mean sensitivity $K_i$, and $d_K$ is its variance (defined as half the spread $\Delta_K = K_{max} - K_{min}$.
+
+From this, we can reparameterize $F(K)$ into one that looks at the max and min pixels only:
+
+$$
+F(d_K) = C\frac{ \overbrace{(\mu_K - d_K)\log(\mu_K - d_K)}^{K_{min}} + \overbrace{(\mu_K + d_K)\log(\mu_K + d_K)}^{K_{max}}}{(\mu_K - d_K) + (\mu_K + d_K)}
+$$
+
+taking the directional derivative with the variance $\dfrac{\partial F}{\partial d_K}$ yields:
+
+$$
+\begin{align*}
+\frac{\partial F}{\partial d_K} &= \frac{C}{2\mu_K} (\log(\mu_k + d_k) - \log(\mu_k - d_k) ) \\
+&= \frac{C}{2\mu_K} \log\left(\frac{K_{max}}{K_{min}} = 1 + \frac{2d_k}{K_{min}}\right)
+\end{align*}
+$$
+
+when $d_K$ is small, this term approaches $0$ and behaves almost linearly (since $\log(1+\epsilon) \approx 1 + \epsilon$; when $d_K$ is large, this term approaches $\log_2(3)$ and behaves logarithmically (less sensitive).
+
+This suggests that:
+
+1. As the spread of your weights $w_i$ goes up, you're going to want to spend more bits on $Q_c$ (color precision)
+2. The decision will be dominated by pixels with large $w_i$ values, that is, the votes of pixels with large $w_i$ will overwhelmingly dominate that of smaller $w_i$s.
+
+This means that if our spread is high, we'll just pull the $Q_c$ up, which is a desirable property.
+
 ### Packing
 
-At the end of this process, we have a $Q^*_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one.
+At the end of this process, we have a $Q^*_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one. However, if the quantization levels available in ASTC is coarse for a particular $Q^*_c$, it is probably better to perform a "two-tap" procedure:
 
-And with this, ladies and gentlemen, we've discovered a very fast and cheap, completely non-combinatorial method to do ASTC quantization mode search.
+1. Identify the two valid quantization methods closest to $Q^*_c$
+2. Calculate the reconstruction error loss for each (either by actually reconstructing the pixels, or using the approximation $E$ above)
+3. Return the best quantization method between the two.
