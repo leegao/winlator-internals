@@ -210,3 +210,9 @@ Q_c^* \approx \frac{\sum_i (1 + 2w_i) \hat{Q}(\delta, w_i)}{\sum_i(1 + 2w_i)}
 $$
 
 note that $\delta$ is invariant wrt the weight indices.
+
+### Packing
+
+At the end of this process, we have a $Q^*_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one.
+
+And with this, ladies and gentlemen, we've discovered a very fast and cheap, completely non-combinatorial method to do ASTC quantization mode search.
