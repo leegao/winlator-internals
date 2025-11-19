@@ -48,7 +48,7 @@ Q_{weight}(w_i)
 \end{pmatrix} - {\mathsf{pixel}}_i
 $$
 
-or we want to minimize the pixel reconstruction error of the image $\hat{\mathsf{pixel}}_i$ decoded from $Q_{c,w}(\theta)$ relative to the ground truth ${\mathsf{pixel}}_i$.
+or we want to minimize the pixel reconstruction error of the image $\hat{\mathsf{pixel}}$ decoded from $Q_{c,w}(\theta)$ relative to the ground truth ${\mathsf{pixel}}$.
 
 ## ASTC Requirements
 
@@ -86,7 +86,7 @@ $$
 Quant_8(0.33) = \frac{\mathsf{round}(0.33 \times 7)}{7}
 $$
 
-Here, the `round(0.33 * 7) = round(2.31) = 2` selects an "index" 2 within your discrete set of 8 values:
+Here, the $\mathsf{round}(0.33 \times 7) = \mathsf{round}(2.31) = 2$ selects an "index" 2 within your discrete set of 8 values:
 
 ```python
 QUANT_8 = [
@@ -176,13 +176,13 @@ E(x, \delta, w_i) &= \delta 2^{-(A-Bx) - 2} + (1-2w_i)2^{-x - 2} \\
 dE/dx &= (1 + 2w_i)2^{-x} - B\delta2^{Bx-A} \\
 & \text{set to 0 to optimize} \\
 B\delta2^{Bx-A} &= (1 + 2w_i)2^{-x} \\
-Q^*_c(\delta, w_i) &= \frac{A + \log_2{\lparen\frac{1 + 2w_i}{B\delta}\rparen}}{1 + B}
+\hat{Q}_c(\delta, w_i) &= \frac{A + \log_2{\frac{1 + 2w_i}{B\delta}}}{1 + B}
 \end{align*}
 $$
 
 ### Perturbation Analysis
 
-We can take the partial derivative of $Q^*_c$ wrt $d\delta$ and $dw$ to understand the behavior of the solution space:
+We can take the partial derivative of $\hat{Q}_c$ wrt $d\delta$ and $dw$ to understand the behavior of the solution space:
 
 $$
 \begin{align*}
@@ -191,4 +191,22 @@ $$
 \end{align*}
 $$
 
+Observations:
 
+1. $Q_c$ decreases with increasing $\delta$ - that is, as your color endpoints become more spread apart, you want to spend more bits on weights. Conversely, as your colors become more packed together, you'll need more precision for your colors.
+2. In particular, as $\delta$ gets smaller, $Q_c$ becomes a lot more sensitive, becoming almost singular the closer it is to 0. In other words, if your color spread is close to 0, then small changes in your color spread will cause a large change in the $Q_c$. At this range, you're better off just capping to the max-$Q_c$ mode.
+3. $Q_c$ increases with increasing $w$ - that is, the larger your weights are, the (ironically) fewer bits you will want to spend on $Q_w$.
+4. As $w$ becomes smaller, $Q_c$ becomes slightly more sensitive to it. But in general, $Q_c$ is not very sensitive to perturbations in the weights.
+5. The sensitivity frontier happens at ~ $\delta - w = 0.5$. Below this line, the effect of $\delta$ dominates, above, $w$ dominates. In general, $\delta$ will be the dominating factor given the geometry of this solution space.
+
+The intuition to draw from this is that if your pair of endpoint colors are very close to each other, you'll want to use more color precision to represent their differences. If your weights are large, you'll want to spend more bits to represent them. In most of the cases, $\delta - w < 0.5$ and the effect of your $\delta$ dominates the decision on where to spend your bits.
+
+### Minimizing the full vec-16
+
+Unfortunately, the full $L^2$ loss function on the pixel reconstruction error is much more unwieldy to use or analyze. Instead, I propose a weight-average heuristic that approximates the optimal argmin of the $L^2$ loss based on the single-element optimization problem:
+
+$$
+Q_c^* \approx \frac{\sum_i (1 + 2w_i) \hat{Q}(\delta, w_i)}{\sum_i(1 + 2w_i)}
+$$
+
+note that $\delta$ is invariant wrt the weight indices.
