@@ -3,9 +3,6 @@ title: "Optimal Quantization Mode Search within ASTC"
 date: 2025-11-18
 ---
 
-
-# "Optimal" Quantization Mode Search within ASTC
-
 Let's say we just spent a generous number of flops doing an incredible job solving the crap out of a series of linear algebra or descent problems in order to find the perfect set of parameters for an ASTC block. What do you do now?
 
 Well, one final step before you write out your block - select your quantization mode.
