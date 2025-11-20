@@ -3,9 +3,6 @@ title: "Optimal Quantization Mode Search within ASTC"
 date: 2025-11-18
 ---
 
-
-# "Optimal" Quantization Mode Search within ASTC
-
 Let's say we just spent a generous number of flops doing an incredible job solving the crap out of a series of linear algebra or descent problems in order to find the perfect set of parameters for an ASTC block. What do you do now?
 
 Well, one final step before you write out your block - select your quantization mode.
@@ -300,17 +297,82 @@ We can also extend this to the natural $L^2$ form as well.
 $$
 \begin{align*}
 ||E(Q_c, \delta, k)||_2^2 &= \sum_{i,j}^{N,M}\frac{E(Q_c, \delta_j, k_i)^2}{NM} \\
-&= \sum_{i,j} \frac{\delta_j^2 \epsilon_w^2 + k_i^2 \epsilon_c^2 + \overbrace{2\delta_j k_i \epsilon_c \epsilon_w}^{=O(2^{-10})}}{NM}
+&= \sum_{i,j} \frac{\delta_j^2 \epsilon_w^2 + k_i^2 \epsilon_c^2 + \overbrace{2\delta_j k_i \epsilon_c \epsilon_w}^{O(2^{-10})}}{NM}\\
+&\approx \frac{N\epsilon_w^2 \sum_j\delta_j^2 + M\epsilon_c^2\sum_ik_i^2 + 2\epsilon_c\epsilon_w\sum_{i,j} \delta_j k_i}{NM}
+\end{align*} 
+$$
+
+Let's define $\tilde \Delta, \tilde K$ as the sample means as before, and $\sigma_\Delta^2, \sigma_K^2$ as the sample variances of $\delta_j, k_i$, then the above can be reduced further to
+
+$$
+\begin{align*}
+||E(Q_c, \delta, k)||_2^2 &= \epsilon_w^2 (\tilde \Delta^2 + \sigma_\Delta^2) + \epsilon_c^2 (\tilde K^2 + \sigma_K^2) + 2\epsilon_c\epsilon_w  \tilde \Delta \tilde K \\
+&= 2^{-2Q_w - 4}(\tilde \Delta^2 + \sigma_\Delta^2) + 2^{-2Q_c - 4} (\tilde K^2 + \sigma_K^2) + 2^{-Q_c - Q_w -3} \tilde \Delta \tilde K
 \end{align*}
 $$
 
-TBD
+Note that this expression is comprised of 3 terms:
 
-TODO: note that this is a classic statistical term that is dependent on the sample variance.
+1. A $Q_w$ term weighted by both the mean and variance of $\Delta$ (color spread)
+2. A $Q_c$ term weighted by both the mean and variance of $K$ (weight)
+3. A $Q_c + Q_w$ term weighted by the mean of both $K$ and $\Delta$, but is insensitive to the variance of either.
+
+To minimize this $L^2$ error function, we can take the derivatives:
+
+$$
+\begin{align*}
+\frac{\partial}{\partial Q_c} 2^{-2Q_w - 4}(\tilde \Delta^2 + \sigma_\Delta^2) &= 2B\log(2) \times \epsilon_w^2 (\tilde \Delta^2 + \sigma_\Delta^2) \\
+\frac{\partial}{\partial Q_c}  2^{-2Q_c - 4} (\tilde K^2 + \sigma_K^2) &= -2\log(2) \times \epsilon_c^2  (\tilde K^2 + \sigma_K^2) \\
+\frac{\partial}{\partial Q_c}  2^{-Q_c - Q_w -3} \tilde \Delta \tilde K &= (-1 + B)\log(2) \times 2 \epsilon_c\epsilon_w  \tilde \Delta \tilde K\\
+\end{align*}
+$$
+
+Sympy seems to struggle with solving this equation (likely because it can't find the correct basis transform to get to a quadratic form), so we'll need to do this one by hand.
+
+Let's start by simplifying this expression to:
+
+$$
+\begin{align*}
+0 &= X 2^{-2A -4 + 2BQ_c} + Y 2^{-2Q_c - 4} + Z 2^{-A - 4 + (B-1)Q_c} \\
+& \text{multiply both sides by } 2^{2Q_c + 4} \\
+&=X2^{-2A + 2BQ_c + 2Q_c} + Y + Z2^{-A + (B-1)Q_c + 2Q_c} \\
+&=X2^{-2A} \cdot 2^{2 \times (B+1)Q_c} + Y + Z2^{-A} \cdot 2^{(B+1)Q_c} \\
+& \text{let } u = 2^{(B+1)Q_c} \\
+&= X2^{-2A} u^2 + Z2^{-A} u + Y
+\end{align*}
+$$
+
+where $X = B(\tilde \Delta^2 +\sigma_\Delta^2)$, $Y = -(\tilde K^2 +\sigma_K^2)$, and $Z = (B-1)\tilde\Delta\tilde K$
+
+Solving this system using the quadratic formula yields this monster:
+
+$$
+Q_c^* = \frac{A + \log_2 \left( \frac{(1-B) \tilde \Delta \tilde K + \sqrt{(B-1)^2 (\tilde \Delta \tilde K)^2 + 4 B (\tilde \Delta^2 + \sigma_\Delta^2)(\tilde K^2 + \sigma_K^2)}}{2 B (\tilde \Delta^2 + \sigma_\Delta^2)} \right)}{B+1}
+$$
+
+It's actually quite amazing that this yields an analytic closed-form solution. However, it is incredibly complex, so it does not lend well to our usual perturbation analysis. Instead, we'll do some reasonable observations from the function:
+
+1. The minimum $L_2^2$ error is characterized by:
+
+$$
+\epsilon_w(1+B)(\epsilon_w(\tilde\Delta^2 + \sigma_\Delta^2) + \epsilon_c \tilde \Delta \tilde K)
+$$
+
+similar to the minimum $L_1$ error (just off by a factor of $(1+B)$)
+
+$$
+\epsilon_w (1 + B) \tilde \Delta
+$$
+
+notice that the L2 error is sensitive to the variance ($\sigma$) while L1 is not.
+
+2. As in the L1 case, increasing $\tilde K$ increases $Q_c$, while increasing $\tilde \Delta$ decreases $Q_c$
+3. $Q_c$ is also sensitive to the variance - increasing $\sigma_K^2$ increases $Q_c$, while increasing $\sigma_\Delta^2$ decreases $Q_c$
+4. $Q_c$ is only highly sensitive to the variance (of both $\Delta, K$) if both its mean and variance are low. This corresponds to very clean and very low-intensity pixels. Within this regime, small changes to either will have result in large changes/gradient in $Q_c$. Conversely, if either the mean or variance are already large, the gradient in $Q_c$ is small.
 
 #### Alternative Formulation 2: Mean of vector of Reconstruction Errors
 
-If you're disturbed by the lack of 
+If you're disturbed by the hard to parse solution for $L_2$, there's another way to incorporate variance-sensitivity into our solution.
 
 TODO: reframe this as a reparameterization of the L1 optimization with variance adjusted based on information density of the variance of both k and d.
 
@@ -326,6 +388,7 @@ At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes th
 
 ```python
 # Assume we're doing single partition
+# Use the L1 (variance-free) cost function
 M = block.channels # 3 for RGB, 4 for RGBA
 
 A = 111 / 16
