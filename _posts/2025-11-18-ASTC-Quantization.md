@@ -169,7 +169,7 @@ This then gives us a construction of the _expected_ pixel reconstruction error o
 $$
 \begin{align*}
 E(\epsilon, \delta_r, w_i) &= \hat{\mathsf{pixel}}_i - \mathsf{pixel}_i = \delta\epsilon_w + \epsilon_c + w_i(\epsilon_c' - \epsilon_c) + O(\epsilon^2) \\
-\mathbb{E}_\epsilon[\mathsf{abs}(E)] &= \delta \underbrace{2^{-Q_w - 2}}_{\mathbb{E}[|\epsilon_w|]} + \underbrace{2^{-Q_c - 2}}_{\mathbb{E}[|\epsilon_c|]} + w\underbrace{{2^{-Q_c}}/{3}}_{\mathbb{E}[|\epsilon_c - \epsilon_c'|]} \\
+\mathbb{E}_\epsilon[\mathsf{abs}(E)] &= \delta \underbrace{2^{-Q_w - 2}}_{\mathbb{E}[|\epsilon_w|]} + \underbrace{2^{-Q_c - 2}}_{\mathbb{E}[|\epsilon_c|]} + w\underbrace{\frac{2^{-Q_c}}3}_{\mathbb{E}[|\epsilon_c - \epsilon_c'|]} \\
 &= \delta 2^{-Q_w-2} + k2^{-Q_c - 2}
 \end{align*}
 $$
