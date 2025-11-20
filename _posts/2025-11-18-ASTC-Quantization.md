@@ -123,40 +123,58 @@ As you can probably intuit, a larger quantization range results in lower average
 In particular, the average error of uniformly distributed data when quantizing to range $R = 2^b$ (where $b$ can be fractional) is given by the following formula:
 
 $$
-\epsilon_{b} \approx 2^{-b - 2}
+E[\mathsf{abs}(\epsilon_{b})] = 2^{-b - 2}
 $$
 
 (technically, it is $2^{-\log2(R-1) - 2}$, but we won't fret too much about this, there are errors in means too)
 
-### Characterizing the per-weight error
+The cross error defined by
+
+$$
+E[\mathsf{abs}(\epsilon_{b} - \epsilon_{b}')] = \frac{2^{-b}}{3}
+$$
+
+which is a little bit bigger than just the average absolute quantization error.
+
+### Characterizing the per-pixel reconstruction error
 
 Okay, so let's say I have a pair of quantization modes $(Q_c, Q_w)$ in units of bits. Based on the error bounds above, we can actually give a bounded error form to our quantization functions:
 
 $$
 \begin{align*}
-Q_c(x) &= \mathsf{round}(x \times (2^{Q_c})) / 2^{Q_c} &= x + \epsilon_{Q_c} \\
-Q_w(w) &= \mathsf{round}(w \times (2^{Q_w})) / 2^{Q_w} &= w + \epsilon_{Q_w} \\
+Q_c(x) &= \mathsf{round}(x \times (2^{Q_c})) / 2^{Q_c} &= x + \epsilon_{c} \\
+Q_w(w) &= \mathsf{round}(w \times (2^{Q_w})) / 2^{Q_w} &= w + \epsilon_{w} \\
 \end{align*}
 $$
 
-this then lends itself to a "perturbation" form of our full problem:
+where $\mathbb{E}[\mathsf{abs}(\epsilon_c)] = 2^{-Q_c-2}$ and $\mathbb{E}[\mathsf{abs}(\epsilon_w)] = 2^{-Q_w-2}$
+
+This then lends itself to a natural "perturbation" form of our full problem in terms of these probabilistic epsilons. Taking the red ($r$) component for the $i^{th}$ pixel as an example:
 
 $$
 \begin{align*}
-\hat{\mathsf{pixel}}_i &= Q_c(ep_0) \times (1 - Q_w(w_i)) + Q_c(ep_1) \times Q_w(w_i) \\
-&=(ep_0 + \epsilon_c)(1 - w_i - \epsilon_w) + (ep_1 + \epsilon_{c'}) \times (w_i + \epsilon_w) \\
-&= ep_0(1-w_i) - ep_0\epsilon_w + \epsilon_c (1-w_i) + ep_1w_i + ep_1\epsilon_w +\epsilon_{c'}w_i + O(\epsilon^2) \\
-&= \mathsf{pixel}_i + (ep_1 - ep_0)\epsilon_w + (1-w_i)\epsilon_c + w_i\epsilon_{c'} + O(\epsilon^2)
+\hat{\mathsf{pixel}}_{r,i} &= Q_c(r_0) \times (1 - Q_w(w_i)) + Q_c(r_1) \times Q_w(w_i) \\
+&=(r_0 + \epsilon_c)(1 - w_i - \epsilon_w) + (r_1 + \epsilon_{c'}) \times (w_i + \epsilon_w) \\
+&= r_0(1-w_i) - r_0\epsilon_w + \epsilon_c (1-w_i) + r_1w_i + r_1\epsilon_w +\epsilon_{c'}w_i + O(\epsilon^2) \\
+&= \mathsf{pixel}_{r,i} + \underbrace{(r_1 - r_0)}_{\delta_r}\epsilon_w + (1-w_i)\epsilon_c + w_i\epsilon_{c}' + O(\epsilon^2)
 \end{align*}
 $$
 
-note that to maximize the error term ($\epsilon$), we can set $\epsilon_{c'} = -\epsilon_{c}$, which gives us a mean pixel reconstruction error of:
+Now, we don't know exactly what these $\epsilon$s are, as they are probabilistic variables sampled from the $\epsilon_b$ distribution described above. However, we can make the (reasonable) assumption that in the limit of large images, the quantization errors of the weights and endpoint colors tend to be drawn uniformly. 
 
-$$E
-(\epsilon_w, \epsilon_c, \delta, w_i) = \hat{\mathsf{pixel}}_i - \mathsf{pixel}_i = \delta\epsilon_w + (1-2w_i)\epsilon_c + O(\epsilon^2)
+As a result, we can use the heuristic where we substitute the $\epsilon$s with their expected absolute value, in order to compute an _expected_ pixel reconstruction error.
+
+This then gives us a construction of the _expected_ pixel reconstruction error of:
+
+$$
+\begin{align*}
+E(\epsilon, \delta_r, w_i) &= \hat{\mathsf{pixel}}_i - \mathsf{pixel}_i = \delta\epsilon_w + \epsilon_c + w_i(\epsilon_c' - \epsilon_c) + O(\epsilon^2) \\
+\mathbb{E}_\epsilon[\mathsf{abs}(E)] &= \delta \underbrace{2^{-Q_w - 2}}_{\mathbb{E}[|\epsilon_w|]} + \underbrace{2^{-Q_c - 2}}_{\mathbb{E}[|\epsilon_c|]} + w\underbrace{{2^{-Q_c}}/{3}}_{\mathbb{E}[|\epsilon_c - \epsilon_c'|]} \\
+&= \delta 2^{-Q_w-2} + k2^{-Q_c - 2}
+\end{align*}
 $$
 
-where we parameterize $\delta = ep_1 - ep_0$ to be the "color spread" within this block.
+where we parameterize $\delta_r =\mathsf{abs}(r_1 - r_0)$ to be the "color spread" for the red component/color channel within this block, and $k_i = (1 + \frac{4w_i}{3})$ to be a weight-sensitivity factor for convenience.
 
 Recall from above that
 
@@ -170,10 +188,10 @@ $$
 \epsilon_w = 2^{-Q_w(Q_c) - 2} = 2^{-(A-BQ_c) - 2}
 $$
 
-so that
+so that the average reconstruction error (assuming that your weights and color endpoints are uniformly distributed) comes out to be
 
 $$
-E(Q_c, \delta, w_i) = \delta 2^{-(A-BQ_c) - 2} + (1-2w_i)2^{-Q_c - 2}
+E(Q_c, \delta_j, k_i) = \delta_j 2^{-(A-BQ_c) - 2} + k_i2^{-Q_c - 2}
 $$
 
 where we can omit the $O(\epsilon^2)$ term since it's at most $2^{-11}$.
@@ -184,21 +202,21 @@ We can actually analytically minimize this equation relative to $Q_c$:
 
 $$
 \begin{align*}
-E(x, \delta, w_i) &= \delta 2^{-(A-Bx) - 2} + (1-2w_i)2^{-x - 2} \\
+E(x, \delta_j, k_i) &= \delta_j 2^{-(A-Bx) - 2} + k_i2^{-x - 2} \\
 & \text{isolate constants} \\
-&= 2^{-2} (\delta2^{Bx - A} + (1 - 2w_i) 2^{-x}) \\
+&= 2^{-2} (\delta_j2^{Bx - A} + k_i 2^{-x}) \\
 & \text{taking the x derivative mod constants} \\
-C \dfrac{dE}{dx} &= (1 + 2w_i)2^{-x} - B\delta2^{Bx-A} \\
+C \dfrac{dE}{dx} &= k_i2^{-x} - B\delta_j2^{Bx-A} \\
 & \text{set to 0 to optimize} \\
-B\delta2^{Bx-A} &= (1 + 2w_i)2^{-x} \\
-\hat{Q}_c(\delta, w_i) &= \frac{A + \log_2{\frac{1 + 2w_i}{B\delta}}}{1 + B}
+B\delta_j2^{Bx-A} &= k_i2^{-x} \\
+\hat{Q}_c(\delta_j, w_i) &= \frac{A + \log_2{\frac{k_i}{B\delta_j}}}{1 + B}
 \end{align*}
 $$
 
-Woot! We now have an analytic description of the optimal value as a "tug-of-war" between $w_i$ and $\delta$:
+Woot! We now have an analytic description of the optimal value as a "tug-of-war" between $k_i$ (AKA $w_i$) and $\delta$:
 
 $$
-\log_2{(1 + 2w_i)} - \log_2{B\delta}
+\log_2{k_i} - \log_2{B\delta}
 $$
 
 (note: you can, and should, make use of libraries like sympy to do these symbolic differentiations)
@@ -208,15 +226,15 @@ from sympy import symbols, diff, solve, log, simplify, Eq, cancel
 Q = symbols('Q', real=True, positive=True)
 A, B = symbols('A B', real=True, positive=True)
 delta = symbols('delta', real=True, positive=True)
-w = symbols('w', real=True, positive=True)
+k = symbols('k', real=True, positive=True)
 
-E = delta * 2**(-(A - B*Q) - 2) + (1 + 2*w) * 2**(-Q - 2)
+E = delta * 2**(-(A - B*Q) - 2) + k * 2**(-Q - 2)
 dE_dQ = diff(E, Q)
 print("Derivative:", dE_dQ)
 print("Solution:", solve(dE_dQ, Q))
 
-# Derivative: -2**(-Q - 2)*(2*w + 1)*log(2) + 2**(-A + B*Q - 2)*B*delta*log(2)
-# Solution: log((2**A*(2*w + 1)/(B*delta))**(1/((B + 1)*log(2))))
+# Derivative: -2**(-Q - 2)*k*log(2) + 2**(-A + B*Q - 2)*B*delta*log(2)
+# Solution: log((2**A*k/(B*delta))**(1/((B + 1)*log(2))))
 ```
 
 #### Perturbation Analysis
@@ -226,7 +244,7 @@ We can take the partial derivative of $\hat{Q}_c$ wrt $d\delta$ and $dw$ to unde
 $$
 \begin{align*}
 \dfrac{dQ_c}{d\delta} &= - \frac{\delta^{-1}}{(1 + B)\ln 2} \\
-\dfrac{dQ_c}{dw} &= + \frac{2(1 + 2w)^{-1}}{(1 + B)\ln 2}
+\dfrac{dQ_c}{dw} &= + \frac{\frac{4}{3}k^{-1}}{(1 + B)\ln 2}
 \end{align*}
 $$
 
@@ -236,104 +254,65 @@ Observations:
 2. In particular, as $\delta$ gets smaller, $Q_c$ becomes a lot more sensitive, becoming almost singular the closer it is to 0. In other words, if your color spread is close to 0, then small changes in your color spread will cause a large change in the $Q_c$. At this range, you're better off just capping to the max-$Q_c$ mode.
 3. $Q_c$ increases with increasing $w$ - that is, the larger your weights are, the (ironically) fewer bits you will want to spend on $Q_w$.
 4. As $w$ becomes smaller, $Q_c$ becomes slightly more sensitive to it. But in general, $Q_c$ is not very sensitive to perturbations in the weights.
-5. The sensitivity frontier happens at ~ $\delta - w = 0.5$. Below this line, the effect of $\delta$ dominates, above, $w$ dominates. In general, $\delta$ will be the dominating factor given the geometry of this solution space.
+5. The sensitivity frontier happens at ~ $\delta = \frac{3}{4}k = w + \frac{3}{4}$. Below this line ($\delta - w < 0.75$), the effect of $\delta$ dominates; above it ($w < \delta - 0.75$), $w$ dominates. In general, $\delta$ will be the dominating factor given the geometry of this solution space (since $\delta$ must be big _and_ $w$ must be small for this to not be the case).
 
-The intuition to draw from this is that if your pair of endpoint colors are very close to each other, you'll want to use more color precision to represent their differences. If your weights are large, you'll want to spend more bits to represent them. In most of the cases, $\delta - w < 0.5$ and the effect of your $\delta$ dominates the decision on where to spend your bits.
+The intuition to draw from this is that if your pair of endpoint colors are very close to each other, you'll want to use more color precision to represent their differences. If your weights are large, you'll want to spend more bits to represent them. In the vast majority of the cases, $\delta - w < 0.75$ and the effect of your $\delta$ dominates the decision on where to spend your bits.
 
-### Minimizing the full vec-16
+### M x N Optimization
 
-Unfortunately, the full $L^2$ loss function on the pixel reconstruction error is much more unwieldy to use or analyze. Instead, I propose a weight-average heuristic that approximates the optimal argmin of the $L^2$ loss based on the single-element optimization problem:
+So far, we've only been considering the subproblem where your weights and pairs of $ep_0, ep_1$ are scalars (e.g. just the red, green, or blue components). Let's now extend our error function to the multi-pixels (N) x multi-channel (M) problem.
 
-$$
-Q_c^* \approx \frac{\sum_i (1 + 2w_i) \hat{Q}(\delta, w_i)}{\sum_i(1 + 2w_i)}
-$$
+#### Direct Solution
 
-note that $\delta$ is invariant wrt the weight indices.
-
-#### Perturbation Analysis
-
-Intuitively, this approximation should be good if the spread of $w_i$ itself is low. Let us also look at how sensitive $Q_c$ is to this spread.
-
-Let's transform the problem slightly. First, let $K_i = 1 + 2w_i$ denote the "sensitivity" factor of $Q_c$ (since increasing $K$ increases $Q_c$ almost linearly when $K$ is close to 1). We can also reduce the weighted means $Q_c$ to just the variables containing $K$:
+One way to approach this problem is to calculate the sum of the errors. Let $N$ be the # of pixels (16), and $M$ be the number of channels (3 for RGB, 4 for RGBA), then
 
 $$
 \begin{align*}
-F(K) &= \frac{\sum_i K_i Q_i}{\sum_i K_i} \\
-& \text{since all but the } \log_2(1+2w_i) \text{ term are independent of K} \\
-&\sim C\frac{\sum_i K_i \log(K_i)}{\sum_i K_i}
+E_\sigma(Q_c, \delta, k) &= \sum_{i,j}^{N,M} E(Q_c, \delta_j, k_i) \\
+&=\sum_{i,j} \delta_j 2^{-Q_w - 2} + \sum_{i,j} k_i2^{-Q_c-2} \\
+&= N 2^{-Q_w - 2} \sum_j \delta_j + M 2^{-Q_c-2} \sum_i k_i \\
+& \text{define the averages } \tilde{\Delta} = \Sigma_j\delta_j/M, \tilde{K} = \Sigma_ik_i/N \\
+&= NM \times (\tilde\Delta 2^{-Q_w - 2} + \tilde K 2^{-Q_c - 2}) \\
+&= NM \times E(Q_c, \tilde \Delta, \tilde K)
 \end{align*}
 $$
 
-where $C = (1+B)^{-1}$ is the scale factor from $Q_c$
+In other words, the sum (or the $L^1$ norm)  of the absolute expected reconstruction error is identical to $N \times M$ times the reconstruction error of the mean/average color spread and weight sensitivity: $\tilde\Delta, \tilde K$.
 
-We can further reduce this problem to just a 2-pixels problem of the spread of $K$:
+Note that $E_\sigma$ is just $NM \times E_{L^1}$, the $L^1$ error over the $(N \times M)$ pixel tensor.
 
-1. let $K_{min} = \mu_K - d_K = \mu - \frac{\Delta_K}{2}$
-2. let $K_{max} = \mu_K + d_K = \mu + \frac{\Delta_K}{2}$
-
-where $\mu_K$ is the mean sensitivity $K_i$, and $d_K$ is its variance (defined as half the spread $\Delta_K = K_{max} - K_{min}$.
-
-From this, we can reparameterize $F(K)$ into one that looks at the max and min pixels only:
+The optimal $\tilde Q_c$ is now given by the same 
 
 $$
-F(d_K) = C\frac{ \overbrace{(\mu_K - d_K)\log(\mu_K - d_K)}^{K_{min}} + \overbrace{(\mu_K + d_K)\log(\mu_K + d_K)}^{K_{max}}}{(\mu_K - d_K) + (\mu_K + d_K)}
+{Q}_c(\tilde \Delta, \tilde K) = \frac{A + \log_2\left(\frac{ \tilde K}{B \cdot \tilde \Delta}\right)}{1 + B}
 $$
 
-taking the directional derivative with the variance $\dfrac{\partial F}{\partial d_K}$ yields:
+with the same analytical properties as before.
+
+A crucial observation: this solution is completely parameterized by the mean/average of $\delta_j, k_i$s, meaning that **it is invariant to variance in $\delta, k$**. This may or may not be a desired property.
+
+From an optimization perspective, this is the optimal solution to minimize the $L^1$ (sum of absolute errors) norm of the errors.
+
+#### Alternative Formulation 1: $L^2$ Reconstruction Error
+
+We can also extend this to the natural $L^2$ form as well.
 
 $$
 \begin{align*}
-\frac{\partial F}{\partial d_K} &= \frac{C}{2\mu_K} (\log(\mu_k + d_k) - \log(\mu_k - d_k) ) \\
-&= \frac{C}{2\mu_K} \log\left(\frac{K_{max}}{K_{min}} = 1 + \frac{2d_k}{K_{min}}\right)
+||E(Q_c, \delta, k)||_2^2 &= \sum_{i,j}^{N,M}\frac{E(Q_c, \delta_j, k_i)^2}{NM} \\
+&= \sum_{i,j} \frac{\delta_j^2 \epsilon_w^2 + k_i^2 \epsilon_c^2 + \overbrace{2\delta_j k_i \epsilon_c \epsilon_w}^{=O(2^{-10})}}{NM}
 \end{align*}
 $$
 
-when $d_K$ is small, this term approaches $0$ and behaves almost linearly (since $\log(1+\epsilon) \approx 1 + \epsilon$; when $d_K$ is large, this term approaches $\log_2(3)$ and behaves logarithmically (less sensitive).
+TBD
 
-This suggests that:
+TODO: note that this is a classic statistical term that is dependent on the sample variance.
 
-1. As the spread of your weights $w_i$ goes up, you're going to want to spend more bits on $Q_c$ (color precision)
-2. The decision will be dominated by pixels with large $w_i$ values, that is, the votes of pixels with large $w_i$ will overwhelmingly dominate that of smaller $w_i$s.
+#### Alternative Formulation 2: Mean of vector of Reconstruction Errors
 
-This means that if our spread is high, we'll just pull the $Q_c$ up, which is a desirable property.
+If you're disturbed by the lack of 
 
-### Multichannel Optimization
-
-So far, we've only been considering the subproblem where your pair of $ep_0, ep_1$ are scalars (e.g. just the red, green, or blue components). Let's now extend our error function to the multichannel problem (3 for RGB, or 4 for RGBA).
-
-#### Weighted Mean
-
-A straightforward extension here is to compute the same weighted sum as before, just now summing over the color channels:
-
-$$
-Q_c = \frac{\sum_{i,j} (1 + 2w_i) \hat{Q}(\delta_j, w_i)}{\sum_{i,j}(1 + 2w_i)} = \mathsf{mean}(Q^R_c, Q^G_c, Q^B_c)
-$$
-
-Note that in this formulation, $Q_c$ gives equal vote to each color channel, which may not be great if you have a block where one channel is flat while the others are high.
-
-Instead, we can formulate another variant of the problem that allows all components to participate in voting for their favorite $Q_c$ allocation.
-
-#### Alternative Solution - Global Optimization
-
-To start, let's see how our cost function $E$ changes. 
-
-We can parameterize it by $\Delta_\Sigma = \delta_R + \delta_G + \cdots$ which is effectively the sum of the spread of the color endpoints, and $K_\Sigma = \sum_i 1 + 2w_i$. Let $M$ be the number of color components (3 or 4), then doing the same error propagation on the reconstruction error will yield:
-
-$$
-4 E_{\Sigma}(Q_c, \Delta_\Sigma, K_\Sigma) \approx \underbrace{\Delta_{\Sigma} \cdot 2^{-Q_w}}_{\text{Weighted Gradient Noise}} + \underbrace{(M \cdot K_{\Sigma}) \cdot 2^{-Q_c}}_{\text{Endpoint Quantization Noise}} 
-$$
-
-where $Q_w = A - BQ_c$.
-
-Note that we've moved the sum over the weights within the endpoint quantization noise term within the error directly (meaning we no longer need to do an explicit weighted means).
-
-The optimal $Q_c$ is now given by
-
-$$
-\hat{Q}_c(\Delta_\Sigma, K_\Sigma) = \frac{A + \log_2\left(\frac{M \cdot K_{\Sigma}}{B \cdot \Delta_{\Sigma}}\right)}{1 + B}
-$$
-
-You'll notice that this solution has the same exact sensitivity to $\delta, K$, however, unlike the weighted-sum solution, this one is completely invariant to the spread of $\delta, K$. This is also a lot more computationally efficient than the earlier solution.
+TODO: reframe this as a reparameterization of the L1 optimization with variance adjusted based on information density of the variance of both k and d.
 
 ### Packing
 
@@ -348,11 +327,13 @@ At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes th
 ```python
 # Assume we're doing single partition
 M = block.channels # 3 for RGB, 4 for RGBA
-Delta = abs(block.ep1 - block.ep0).sum() # + ep2,ep3 too
-K = (1 + 2 * block.weights).sum()
+
 A = 111 / 16
 B = 2 * M / 16
-Qc = clamp((A + math.log2(M * K / (B * Delta))) / (1 + B), 1, 8)
+
+Delta = abs(block.ep1 - block.ep0).flatten().mean() # + ep2,ep3 too
+K = (1 + 4 * block.weights / 3).mean()
+Qc = clamp((A + math.log2(K / (B * Delta))) / (1 + B), 1, 8)
 
 # Look for the pair of modes closes to Qc
 for i, mode in enumerate(ASTC_MODES):
