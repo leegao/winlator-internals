@@ -15,10 +15,12 @@ In this post, I'll present a heuristic that approximately minimizes the $L^2$ er
 
 **TL;DR:**
 
+You can model the quantization error in terms of the expected error for a given quantization method (which should hold for large images), then use that to derive a cost function to optimize.
+
 The optimal number of bits per color endpoint component per pixel is given by
 
 $$
-\hat{Q^*}_c(\delta_j, w_i) = \frac{A + \log_2{\frac{1 + 2w_i}{B\delta_j}}}{1 + B}
+Q_c(\delta_j, w_i) = \frac{A + \log_2{\frac{1 + 2w_i}{B\delta_j}}}{1 + B}
 $$
 
 where
@@ -27,6 +29,14 @@ where
 2. $B = \frac{\text{number of color endpoint components}}{16}$, so 6 for 1 x RGB, 8 for 1 x RGBA, 12 for 2 x RGB, and 16 for 2 x RGBA
 3. $\delta_j = ep_1[j] - ep_0[j]$ is the "spread" or the difference between the first and second color endpoint component for this pixel
 4. $w_i$ is the $i^{th}$ weight of the pixel
+
+The optimal $Q^*_c$ that opimizes the $L_1$ error for a full block of M x N channels and pixels is given by
+
+$$
+Q^*_c = Q_c(\tilde \Delta, \tilde W)
+$$
+
+where $\tilde \Delta, \tilde W$ are the means of $\delta_j, w_i$. This optimizer is invariant to variance within your data, so you may want to look at the $L_2$ or the mean-of-$Q_{ij}$ optimizers.
 
 ## ASTC Parameters
 
@@ -352,7 +362,8 @@ $$
 
 It's actually quite amazing that this yields an analytic closed-form solution. However, it is incredibly complex, so it does not lend well to our usual perturbation analysis. Instead, we'll do some reasonable observations from the function:
 
-1. The minimum $L_2^2$ error is characterized by:
+1. This agrees with the $L_1$ error as the variance goes to 0. As $\sigma \rightarrow 0$, the term under the root becomes $\sqrt{(B+1)^2\tilde\Delta^2\tilde K^2}$, so that the log2 term simplifies to $\log_2\left(\frac{2\tilde\Delta\tilde K}{2B\tilde\Delta^2}\right)$.
+2. The minimum $L_2^2$ error is characterized by: 
 
 $$
 \epsilon_w(1+B)(\epsilon_w(\tilde\Delta^2 + \sigma_\Delta^2) + \epsilon_c \tilde \Delta \tilde K)
@@ -366,17 +377,50 @@ $$
 
 notice that the L2 error is sensitive to the variance ($\sigma$) while L1 is not.
 
-2. As in the L1 case, increasing $\tilde K$ increases $Q_c$, while increasing $\tilde \Delta$ decreases $Q_c$
-3. $Q_c$ is also sensitive to the variance - increasing $\sigma_K^2$ increases $Q_c$, while increasing $\sigma_\Delta^2$ decreases $Q_c$
-4. $Q_c$ is only highly sensitive to the variance (of both $\Delta, K$) if both its mean and variance are low. This corresponds to very clean and very low-intensity pixels. Within this regime, small changes to either will have result in large changes/gradient in $Q_c$. Conversely, if either the mean or variance are already large, the gradient in $Q_c$ is small.
+3. As in the L1 case, increasing $\tilde K$ increases $Q_c$, while increasing $\tilde \Delta$ decreases $Q_c$
+4. $Q_c$ is also sensitive to the variance - increasing $\sigma_K^2$ increases $Q_c$, while increasing $\sigma_\Delta^2$ decreases $Q_c$
 
 #### Alternative Formulation 2: Mean of vector of Reconstruction Errors
 
-If you're disturbed by the hard to parse solution for $L_2$, there's another way to incorporate variance-sensitivity into our solution.
+If you're disturbed by the hard to parse solution for $L_2$, there's another way to incorporate variance-sensitivity into our solution. Just calculate the mean of the errors themselves (as opposed to the $L_1$ interpretation of finding the error of the mean parameters).
 
-TODO: reframe this as a reparameterization of the L1 optimization with variance adjusted based on information density of the variance of both k and d.
+Let
 
-### Packing
+$$
+Q_{ij} = \frac{A + \log_2(B^{-1}) + \log_2k_i - \log_2\delta_j}{1+B}
+$$
+
+and $k_i = \tilde K(1 + d_{k_i}), \delta_j = \tilde \Delta(1 + d_{\delta_j})$, then
+
+$$
+\begin{align*}
+\tilde Q_c &= \sum_{i,j} \frac{Q_{ij}}{MN} \\
+&= \frac{1}{MN} \frac{MN(A +\log_2(B^{-1})) + M\sum_i \log_2k_i - N\sum_j \log_2 \delta_j}{1+B} \\
+&= \frac{1}{MN} \frac{MN(A +\log_2(B^{-1})) + M\sum_i \log_2 (\tilde K (1 + d_{k_i})) - N\sum_j \log_2 (\tilde \Delta (1 + d_{\delta_j}))}{1+B} \\
+&= \frac{1}{MN} \frac{MN(A +\log_2(B^{-1}) + \log_2 \tilde K - \log_2 \tilde \Delta) + M\sum_i \log_2 (1 + d_{k_i}) - N\sum_j \log_2 (1 + d_{\delta_j})}{1+B} \\
+&= \frac{A + \log_2\left(\frac{\tilde K}{B\tilde\Delta}\right)}{1 + B} + \frac{\sum_i \log_2(1 + d_{k_i})}{N(1+B)} - \frac{\sum_j \log_2(1 + d_{\delta_j})}{M(1+B)}
+\end{align*}
+$$
+
+this then can be re-parameterized back in terms of the $L_1$ $Q_c(\tilde K, \tilde \Delta)$ as:
+
+$$
+\tilde Q_c = Q_c(\tilde K, \tilde \Delta) + \frac{\frac{1}{N} \sum_i \log_2(\frac{k_i}{\tilde K}) - \frac{1}{M} \sum_j \log_2(\frac{\delta_j}{\tilde \Delta})}{1 + B}
+$$
+
+with an interesting interpretation:
+
+$$
+ \frac{1}{N} \sum_i \log_2 \frac{k_i}{\tilde K} = \mathbb{E}[\log_2(k_i)] - \log_2(\tilde K)
+$$
+
+is the difference between the average information density in bits of $k_i$ and the information density of the average $\tilde K$. In other words, it's sort of like a variance metric for the information density within $k_i, \delta_j$, and also obeys the same general rules:
+
+1. $\tilde Q_c \rightarrow Q_c(\tilde K, \tilde \Delta)$ as the variance goes to 0
+2. As in the L1 and L2 case, increasing $\tilde K$ increases $Q_c$, while increasing $\tilde \Delta$ decreases $Q_c$
+4. $Q_c$ is also sensitive to the variance - increasing the information density variance of $k_i$ increases $Q_c$, while $\delta_j$ decreases $Q_c$
+
+### Snapping to valid ASTC Quantization Modes
 
 At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one. However, if the quantization levels available in ASTC is coarse for a particular $Q_c$, it is probably better to perform a "two-tap" procedure:
 
@@ -384,7 +428,7 @@ At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes th
 2. Calculate the reconstruction error loss for each (either by actually reconstructing the pixels, or using the approximation $E$ above)
 3. Return the best quantization method between the two.
 
-### Final Algorithm
+## Final Algorithm
 
 ```python
 # Assume we're doing single partition
