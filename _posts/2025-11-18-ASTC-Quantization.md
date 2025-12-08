@@ -445,7 +445,9 @@ Assuming both $k_i$ and $\delta_j$ are drawn from a gaussian distribution (cente
 1. For $\delta_j$, this would be expected to be an extra ~0.44 bits ($\times \frac{1}{1+B}$) increase in the $Q_c$
 2. For $k_i$, since it's so close to 1, you would be expected to be pulled down by ~0.04 bits ($\times \frac{1}{1+B}$) decrease in the $Q_c$
 
-In general, the $\delta_j$ noise would dominate since it's just much closer to 0, and you'd expect ~ a +0.3 bits increase in $Q_c$ contribution (on average) when the noise in $\delta$ is high.
+In general, the $\delta_j$ noise would dominate since it's just much closer to 0, and you'd expect ~ a +0.3 bits increase in $Q_c$ contribution (on average) when the noise in $\delta$ is high. 
+
+It is not nothing, but definitely small enough that this is more or less noise compared to the "snapping" process described in the next section. As a result, the recommendation here is to just use the variance-insensitive $L_1$ minimizer instead, as the actual gap taking variance into account is (on average) bounded by just ~0.3 bits.
 
 ### Snapping to valid ASTC Quantization Modes
 
