@@ -420,6 +420,33 @@ is the difference between the average information density in bits of $k_i$ and t
 2. As in the L1 and L2 case, increasing $\tilde K$ increases $Q_c$, while increasing $\tilde \Delta$ decreases $Q_c$
 4. $Q_c$ is also sensitive to the variance - increasing the information density variance of $k_i$ increases $Q_c$, while $\delta_j$ decreases $Q_c$
 
+#### Interpretation
+
+Doing a bit of algebraic reordering, you'll find that the $L_1$ minimizer is:
+
+$$
+Q^*_{L_1} = \frac{A + \log_2(\mathbb{E}_i [k_i]) - \log_2(\mathbb{E}_j [\delta_j] - \log_2(B))}{1 + B}
+$$
+
+while this mean of minimizers is:
+
+$$
+Q^*_{\mathbb{E}} = \frac{A + \mathbb{E}_i [\log_2 k_i] - \mathbb{E}_j [\log_2 \delta_j] - \log_2(B))}{1 + B}
+$$
+
+In general, the Jensen "gap" between the mean-of-log (or a log-geometric-avg) vs the log-of-mean (or a log-arithmetic-avg) would come out to be about
+
+$$
+\mathsf{Gap} = \frac{\frac{\sigma_K^2}{\mu_K^2} - \frac{\sigma_\Delta^2}{\mu_\Delta^2}}{2\log 2} \times \frac{1}{1+B}
+$$
+
+Assuming both $k_i$ and $\delta_j$ are drawn from a gaussian distribution (centered at their respective mid-points of their bounds), then we can actually bound the Jensen gap between the mean-of-log vs the log-of-mean term in terms of their variance $\sigma^2$:
+
+1. For $\delta_j$, this would be expected to be an extra ~0.44 bits ($\times \frac{1}{1+B}$) increase in the $Q_c$
+2. For $k_i$, since it's so close to 1, you would be expected to be pulled down by ~0.04 bits ($\times \frac{1}{1+B}$) decrease in the $Q_c$
+
+In general, the $\delta_j$ noise would dominate since it's just much closer to 0, and you'd expect ~ a +0.3 bits increase in $Q_c$ contribution (on average) when the noise in $\delta$ is high.
+
 ### Snapping to valid ASTC Quantization Modes
 
 At the end of this process, we have a $Q_c$ between 1 and 8 bits that denotes the optimal color quantization mode (in some fractional bits). However, not all (most) $Q_c$s are valid ASTC quantization mode. We can do a final step to iterate through all valid ASTC modes, and snap $Q_c$ to the closest valid one. However, if the quantization levels available in ASTC is coarse for a particular $Q_c$, it is probably better to perform a "two-tap" procedure:
