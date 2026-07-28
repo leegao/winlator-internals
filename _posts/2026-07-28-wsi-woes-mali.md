@@ -1,7 +1,7 @@
 ---
 title: "WSI Woes on Mali"
 date: 2026-07-28
-categories: [Vulkan, Graphics, Emulation]
+categories: [wrapper]
 tags: [mali, vulkan, wsi, winlator, android, bionic-wrapper]
 ---
 
@@ -67,7 +67,7 @@ When there are no suitable image format/memory pairs to support direct rendering
 
 
 
-In particular, the *primary image* must support all of the properties/features required for the game engine to actually render to it (usually, this is a particular swapchain format such as `B8G8R8A8`, as well as a specific set of usage flags, such as the ability to be attached as a render color input attachment), which on some devices disqualifies it for external memory sharing. As a result, we create a secondary image that is solely responsible for external memory sharing, and we’ll synchronize the two by “**blitting**” (a fancy word for “copying”) the data from the local primary image into the externally shared secondary image.
+In particular, the *primary image* must support all of the properties/features required for the game engine to actually render to it (usually, this is a particular swapchain format such as `B8G8R8A8`, as well as a specific set of usage flags, such as the ability to be attached as a render color input attachment), which on some devices disqualifies it for external memory sharing. As a result, we create a secondary image that is solely responsible for external memory sharing, and we’ll synchronize the two by "**blitting**" (a fancy word for "copying") the data from the local primary image into the externally shared secondary image.
 
 
 ```
@@ -95,13 +95,15 @@ INDIRECT BLITTING PATH (One-Copy Fallback)
 
 
 
-Unfortunately, we don’t have unlimited “degrees of freedom” for the swapchain image formats that can be supported. As we will soon see, we can *only* advertise support for `BGRA8` swapchains, and this surprisingly leaves no options for direct rendering on certain (Mali) drivers.
+Unfortunately, we don’t have unlimited "degrees of freedom" for the swapchain image formats that can be supported. As we will soon see, we can *only* advertise support for `BGRA8` swapchains, and this surprisingly leaves no options for direct rendering on certain (Mali) drivers.
 
-### Winlator “X11” and B8G8R8A8
+### Winlator "X11" and B8G8R8A8
 
 
 
-Prior to [the DisplayX renderer on Winlator Ludashi (see commit a1dfbde)](https://github.com/Pipetto-crypto/winlator/commit/a1dfbdec1f7cc7e09a1a1fae0bdbf245506fb23d#diff-e3a40c38780b91e3fcdb3a32afd9fbc7bf442f3a120aa2c5af76a62a0b92063bL480), the Winlator X11 emulated display server (as well as nearly every other Winlator-based emulators’ display servers) hardcode the expected swapchain format to `HAL_PIXEL_FORMAT_BGRA_8888`. This traces back to the original Winlator. Note however, upstream Winlator has actually [added support for R8B8G8A8 swapchain images (see commit 99e8e07)](https://github.com/brunodev85/winlator-app/commit/99e8e0709952a7326d73f9adf7bc617d461b6078) about a year ago, but most major forks of Winlator branched well before this change.
+Prior to [the DisplayX renderer on Winlator Ludashi (see commit a1dfbde)](https://github.com/Pipetto-crypto/winlator/commit/a1dfbdec1f7cc7e09a1a1fae0bdbf245506fb23d#diff-e3a40c38780b91e3fcdb3a32afd9fbc7bf442f3a120aa2c5af76a62a0b92063bL480), the Winlator X11 emulated display server (as well as nearly every other Winlator-based emulators’ display servers) hardcode the expected swapchain format to `HAL_PIXEL_FORMAT_BGRA_8888`. This traces back to the original Winlator.
+
+> **NOTE**: The upstream Winlator has actually [added support for R8B8G8A8 swapchain images (see commit 99e8e07)](https://github.com/brunodev85/winlator-app/commit/99e8e0709952a7326d73f9adf7bc617d461b6078) about a year ago, but most major forks of Winlator branched well before this change.
 
 For our purpose (the M0 of this workaround), we’ll treat this as a static requirement that our final exported swapchain image to the Winlator display server MUST be an AHB in `B8G8R8A8` format.
 
@@ -110,16 +112,16 @@ Since the wrapper aims to work generally across all emulators, we’re also limi
 This then constrains the (primary) swapchain image format supported by the wrapper [to just VK_FORMAT_B8G8R8A8](https://github.com/leegao/mesa-wrapper-CI/blob/wrapper-25/src/vulkan/wsi/wsi_common_x11.c#L446).
 
 > **NOTE**: As a followup, a direct passthrough path for RGBA display servers for DisplayX (and other renderers that support RGBA swapchains) will be needed.
->
->
 
 ### Mali Drivers CANNOT export HAL_PIXEL_FORMAT_BGRA_8888
 
 
 
-A second pin to constrain our problem is the fact that, unlike Adreno, Mali does not support importing `HAL_PIXEL_FORMAT_BGRA_8888` (which the winlator x11 display server expects) into Vulkan. I’m still actively reverse engineering `libGLES_mali.so` (which despite the name, contains the Vulkan driver on Mali) to understand why, but we’ll just treat this as another hard requirement.
+A second pin to constrain our problem is the fact that, unlike Adreno, Mali does not support importing `HAL_PIXEL_FORMAT_BGRA_8888` (which the winlator x11 display server expects) into Vulkan. We’ll just treat this as another hard requirement.
 
-This already tells us why direct rendering fails on Mali devices. In particular, the wrapper (Mesa WSI + xMeM’s AHB backend) performs the [following probe](https://github.com/leegao/mesa-wrapper-CI/blob/wrapper-25/src/vulkan/wsi/wsi_common_android.c#L21,L39) to check for DR support:
+---
+
+This already tells us why direct rendering fails on Mali devices. In particular, the wrapper (Mesa WSI + AHB backend) performs the [following probe](https://github.com/leegao/mesa-wrapper-CI/blob/wrapper-25/src/vulkan/wsi/wsi_common_android.c#L21,L39) to check for DR support:
 
 ```c
 if (AHardwareBuffer_allocate(&(AHardwareBuffer_Desc){
@@ -153,7 +155,7 @@ result = wsi->GetAndroidHardwareBufferPropertiesANDROID(
 
 While the `AHardwareBuffer_allocate` succeeds (ARM devices are still capable of *allocating* `BGRA_8888` AHBs), importing them into Vulkan fails (the `vkGetAndroidHardwareBufferPropertiesANDROID`).
 
-For the direct rendering path, we would need to allocate the following swapchain image:
+Regardless, we would need to allocate the following swapchain image:
 
 ```c
 VkExternalMemoryImageCreateInfo ext_mem_info = {
@@ -174,7 +176,7 @@ VkImageCreateInfo no_blit_image_info = {
 
 ```
 
-This will immediately fail, as importing BGRA AHBs is disallowed on the Mali driver. Instead, we fall back to the blit path.
+This would have failed anyways, as importing BGRA AHBs is disallowed on the Mali driver. Instead, we fall back to the blit path.
 
 ---
 
@@ -188,13 +190,13 @@ This is typically not fully safe in specific circumstances where the driver can 
 
 The full solution that the WSI wrapper performs is as follows:
 
-1. The application requests a `BGRA_8888` swapchain image.
+* The application requests a `BGRA_8888` swapchain image.
 
 
-2. The WSI engine detects that `BGRA_8888` swapchain images are not importable from AHB, so it switches to blit mode.
+* The WSI engine detects that `BGRA_8888` swapchain images are not importable from AHB, so it switches to blit mode.
 
 
-3. The WSI creates a **local** (not exportable) primary image in `BGRA_8888` mode:
+* The WSI creates a **local** (not exportable) primary image in `BGRA_8888` mode:
 
 
 ```c
@@ -212,10 +214,10 @@ VkImageCreateInfo primary_image_info = {
 ```
 
 
-4. The WSI returns this local primary image to the game as the render surface.
+* The WSI returns this local primary image to the game as the render surface.
 
 
-5. The WSI then creates a second **external** (exportable via AHB) secondary image in `RGBA_8888` mode:
+* The WSI then creates a second **external** (exportable via AHB) secondary image in `RGBA_8888` mode:
 
 
 ```c
@@ -238,7 +240,7 @@ VkImageCreateInfo secondary_image_info = {
 ```
 
 
-6. Finally, when present is called, a [`vkCmdCopyImage`](https://github.com/leegao/mesa-wrapper-CI/blob/05bca95965ccebfeb2d34e415f5c5919e790a875/src/vulkan/wsi/wsi_common.c#L2091) is issued to perform a one-copy “blit” (as opposed to the zero-copy under DR mode) from the primary render buffer to the secondary export buffer that is exported to the display server.
+* Finally, when present is called, a [`vkCmdCopyImage`](https://github.com/leegao/mesa-wrapper-CI/blob/05bca95965ccebfeb2d34e415f5c5919e790a875/src/vulkan/wsi/wsi_common.c#L2091) is issued to perform a one-copy "blit" (as opposed to the zero-copy under DR mode) from the primary render buffer to the secondary export buffer that is exported to the display server.
 
 
 
@@ -262,7 +264,7 @@ In particular:
 
 
 
-The main workaround here is that “IPC” between the renderer and the display server:
+The main workaround here is that "IPC" between the renderer and the display server:
 
 * The renderer creates a `RGBA_8888` (valid in Mali) external buffer memory that contains physical texel data in `[B, G, R, A]` format.
 
@@ -337,8 +339,7 @@ Wine-aarch64 by default, as the name suggests, runs in 64-bit mode. To interface
 Under `syswow64` (32-bit) emulation, the guest application/game expects all memory handles it receives to fit into a 32-bit handle. Where Vulkan is concerned, this means that when you call:
 
 ```c
-vkMapMemory(2KHR)(...)
-
+    vkMapMemory(2KHR)(...)
 ```
 
 The handle returned by your unified 64-bit Vulkan driver **MUST** also fit into a 32-bit handle. Except, Vulkan does not do this at all. By default, unless you specifically specify where to map your memory, Vulkan will almost certainly return a 64-bit handle, which would crash the guest 32-bit application/game.
@@ -489,7 +490,7 @@ ion_heap_alloc(int heap_fd, size_t size) {
 
 However, there are actually 2 major, mutually incompatible UAPIs for ion-heap.
 
-Prior to Linux 4.12, the ionheap kernel driver uses the [legacy UAPI](https://github.com/GameNative/mesa/pull/5/changes#diff-660f29f9ee3dd97cd63da99119f2ad822c6fde63307f24bd86c996dabbb26552R40), while the “modern” UAPI (used here in the wrapper) is available on GKI 4.14 onwards. However, Mali’s GKI seems to have decided against the ionheap modernization update in their GKI 4.12, 4.14, and 4.19, and instead only supports legacy UAPI.
+Prior to Linux 4.12, the ionheap kernel driver uses the [legacy UAPI](https://github.com/GameNative/mesa/pull/5/changes#diff-660f29f9ee3dd97cd63da99119f2ad822c6fde63307f24bd86c996dabbb26552R40), while the "modern" UAPI (used here in the wrapper) is available on GKI 4.14 onwards. However, Mali’s GKI seems to have decided against the ionheap modernization update in their GKI 4.12, 4.14, and 4.19, and instead only supports legacy UAPI.
 
 As a result, non-AHB external memory (ionheap) immediately fails on devices without the GKI-android12-5.10 (mandatory `dmabuf` migration) kernel.
 
@@ -512,7 +513,7 @@ Since the swapchain image is almost never actually host-mapped, a very simple an
 
 
 
-To enable direct rendering support on Mali (and also indirectly bypass the blitting bugs as well), we can also try to emulate a virtual bgra-ordered swapchain image buffer using the same trick that our blitting path uses - by creating a `RGBA_8888` AHB buffer, importing it into Vulkan (this is legal with Mali drivers), and then “lying” to the application that our swapchain format is *really* a `VK_FORMAT_B8G8R8A8_UNORM` `VkImage(View)`.
+To enable direct rendering support on Mali (and also indirectly bypass the blitting bugs as well), we can also try to emulate a virtual bgra-ordered swapchain image buffer using the same trick that our blitting path uses - by creating a `RGBA_8888` AHB buffer, importing it into Vulkan (this is legal with Mali drivers), and then "lying" to the application that our swapchain format is *really* a `VK_FORMAT_B8G8R8A8_UNORM` `VkImage(View)`.
 
 This is actually very simple to do, with some caveats that rarely apply to swapchain images. Vulkan abstracts *most* image-related operations through `VkImageView`s. One of the cool things you can do with a `VkImageView` is to create one with a BGRA8 format (for the image *view*) on top of a physical RGBA8 `VkImage`. When the application performs image-view operations (using the BGRA8 view), the driver ensures that the read/write order (relative to the physical memory) conforms to our expected `[B, G, R, A]` order.
 
